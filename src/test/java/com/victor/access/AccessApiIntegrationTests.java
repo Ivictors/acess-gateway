@@ -56,6 +56,33 @@ class AccessApiIntegrationTests {
     private JdbcClient jdbcClient;
 
     @Test
+    void rejectsMissingOccurredAtBeforeIngestingEvent() throws Exception {
+        IllegalArgumentException missingCommand = assertThrows(IllegalArgumentException.class,
+                () -> ingestEvent.execute(null));
+        assertEquals("command is required", missingCommand.getMessage());
+
+        var registration = createDevice.execute("SN-missing-time", "Entrance");
+        UUID deviceId = registration.device().getId();
+        var command = new IngestDeviceEventUseCase.Command(
+                deviceId, "event-missing-time", EventType.ACCESS_GRANTED, "card-1", null);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> ingestEvent.execute(command));
+        assertEquals("occurredAt is required", exception.getMessage());
+        assertEquals(0, events.findByDeviceId(deviceId, 10).size());
+
+        String request = """
+                {"deviceId":"%s","externalEventId":"event-missing-time",
+                 "eventType":"ACCESS_GRANTED","credentialRef":"card-1"}
+                """.formatted(deviceId);
+        mvc.perform(post("/device-events")
+                        .header("Authorization", "Bearer " + registration.apiKey())
+                        .contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isBadRequest());
+        assertEquals(0, events.findByDeviceId(deviceId, 10).size());
+    }
+
+    @Test
     void repeatedEventReturnsOriginalAndDifferentPayloadConflicts() {
         Device device = createDevice.execute("SN-idempotency", "Entrance").device();
         UUID deviceId = device.getId();

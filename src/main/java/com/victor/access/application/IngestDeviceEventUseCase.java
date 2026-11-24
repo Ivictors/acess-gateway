@@ -22,6 +22,12 @@ public class IngestDeviceEventUseCase {
     }
 
     public Result execute(Command command) {
+        if (command == null) {
+            throw new IllegalArgumentException("command is required");
+        }
+        if (command.occurredAt() == null) {
+            throw new IllegalArgumentException("occurredAt is required");
+        }
         Device device = devices.findById(command.deviceId())
                 .orElseThrow(() -> new DeviceNotFoundException(command.deviceId()));
         Instant occurredAt = command.occurredAt().truncatedTo(ChronoUnit.MICROS);
