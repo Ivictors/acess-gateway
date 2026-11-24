@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.jayway.jsonpath.JsonPath;
 import com.victor.access.application.ConflictException;
 import com.victor.access.application.CreateDeviceUseCase;
 import com.victor.access.application.IngestDeviceEventUseCase;
@@ -34,9 +35,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 @SpringBootTest
 @Import(PostgresTestConfiguration.class)
-@AutoConfigureMockMvc(addFilters = false)
+@AutoConfigureMockMvc
 @Transactional
 class AccessApiIntegrationTests {
+    private static final String ADMIN_TOKEN = "admin-token-for-integration-tests-only-123456789";
+
     @Autowired
     private MockMvc mvc;
 
@@ -54,7 +57,7 @@ class AccessApiIntegrationTests {
 
     @Test
     void repeatedEventReturnsOriginalAndDifferentPayloadConflicts() {
-        Device device = createDevice.execute("SN-idempotency", "Entrance");
+        Device device = createDevice.execute("SN-idempotency", "Entrance").device();
         UUID deviceId = device.getId();
         Instant occurredAt = Instant.parse("2026-01-01T10:00:00.123456789Z");
         var command = new IngestDeviceEventUseCase.Command(
@@ -78,7 +81,7 @@ class AccessApiIntegrationTests {
 
     @Test
     void refusesNewEventsForInactiveDevice() {
-        Device device = createDevice.execute("SN-inactive", "Side entrance");
+        Device device = createDevice.execute("SN-inactive", "Side entrance").device();
         var original = new IngestDeviceEventUseCase.Command(
                 device.getId(), "event-before-deactivation", EventType.ACCESS_GRANTED,
                 "card-1", Instant.parse("2026-01-01T10:00:00Z"));
@@ -98,7 +101,7 @@ class AccessApiIntegrationTests {
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void simultaneousRetriesCreateOnlyOneEvent() throws Exception {
-        Device device = createDevice.execute("SN-concurrent", "Entrance");
+        Device device = createDevice.execute("SN-concurrent", "Entrance").device();
         var command = new IngestDeviceEventUseCase.Command(
                 device.getId(), "event-concurrent", EventType.ACCESS_GRANTED,
                 "card-1", Instant.parse("2026-01-01T10:00:00Z"));
@@ -134,16 +137,20 @@ class AccessApiIntegrationTests {
         String deviceJson = """
                 {"serialNumber":"SN-api","name":"Entrance"}
                 """;
-        String location = mvc.perform(post("/devices")
+        String deviceBody = mvc.perform(post("/devices")
+                        .header("Authorization", "Bearer " + ADMIN_TOKEN)
                         .contentType(MediaType.APPLICATION_JSON).content(deviceJson))
                 .andExpect(status().isCreated())
                 .andExpect(header().exists("Location"))
-                .andExpect(jsonPath("$.active").value(true))
-                .andExpect(jsonPath("$.createdAt").exists())
-                .andReturn().getResponse().getHeader("Location");
-        UUID deviceId = UUID.fromString(location.substring(location.lastIndexOf('/') + 1));
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.device.active").value(true))
+                .andExpect(jsonPath("$.device.createdAt").exists())
+                .andExpect(jsonPath("$.apiKey").exists())
+                .andReturn().getResponse().getContentAsString();
+        UUID deviceId = UUID.fromString(JsonPath.read(deviceBody, "$.device.id"));
+        String deviceToken = JsonPath.read(deviceBody, "$.apiKey");
 
-        mvc.perform(get("/devices/{id}", deviceId))
+        mvc.perform(get("/devices/{id}", deviceId).header("Authorization", "Bearer " + ADMIN_TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.serialNumber").value("SN-api"));
 
@@ -152,45 +159,53 @@ class AccessApiIntegrationTests {
                  "credentialRef":"card-1","occurredAt":"2026-01-01T10:00:00Z"}
                 """.formatted(deviceId);
         mvc.perform(post("/device-events")
+                        .header("Authorization", "Bearer " + deviceToken)
                         .contentType(MediaType.APPLICATION_JSON).content(eventJson))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.externalEventId").value("event-api"));
         mvc.perform(post("/device-events")
+                        .header("Authorization", "Bearer " + deviceToken)
                         .contentType(MediaType.APPLICATION_JSON).content(eventJson))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.externalEventId").value("event-api"));
         mvc.perform(post("/device-events")
+                        .header("Authorization", "Bearer " + deviceToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(eventJson.replace("ACCESS_GRANTED", "ACCESS_DENIED")))
                 .andExpect(status().isConflict());
-        mvc.perform(get("/devices/{id}/events", deviceId))
+        mvc.perform(get("/devices/{id}/events", deviceId)
+                        .header("Authorization", "Bearer " + ADMIN_TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
     }
 
     @Test
     void returnsValidationNotFoundAndConflictStatuses() throws Exception {
-        mvc.perform(post("/devices").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/devices").header("Authorization", "Bearer " + ADMIN_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"serialNumber\":\"\",\"name\":\"Entrance\"}"))
                 .andExpect(status().isBadRequest());
 
-        mvc.perform(get("/devices/{id}", UUID.randomUUID()))
+        mvc.perform(get("/devices/{id}", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + ADMIN_TOKEN))
                 .andExpect(status().isNotFound());
 
-        Device device = createDevice.execute("SN-query", "Side entrance");
-        mvc.perform(get("/devices/{id}/events", device.getId()).param("limit", "101"))
+        Device device = createDevice.execute("SN-query", "Side entrance").device();
+        mvc.perform(get("/devices/{id}/events", device.getId()).param("limit", "101")
+                        .header("Authorization", "Bearer " + ADMIN_TOKEN))
                 .andExpect(status().isBadRequest());
-        mvc.perform(get("/devices/{id}/events", UUID.randomUUID()))
+        mvc.perform(get("/devices/{id}/events", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + ADMIN_TOKEN))
                 .andExpect(status().isNotFound());
-
     }
 
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void returnsConflictForDuplicateDeviceSerial() throws Exception {
-        Device device = createDevice.execute("SN-conflict", "Entrance");
+        Device device = createDevice.execute("SN-conflict", "Entrance").device();
         try {
-            mvc.perform(post("/devices").contentType(MediaType.APPLICATION_JSON)
+            mvc.perform(post("/devices").header("Authorization", "Bearer " + ADMIN_TOKEN)
+                            .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"serialNumber\":\"SN-conflict\",\"name\":\"Other\"}"))
                     .andExpect(status().isConflict());
         } finally {
