@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -25,7 +26,7 @@ public class JdbcAccessEventRepository implements AccessEventRepository {
     }
 
     @Override
-    public AccessEvent create(
+    public Optional<AccessEvent> createIfAbsent(
             UUID id,
             UUID deviceId,
             String externalEventId,
@@ -40,6 +41,7 @@ public class JdbcAccessEventRepository implements AccessEventRepository {
                         VALUES (
                             :id, :deviceId, :externalEventId, :eventType, :credentialRef, :occurredAt
                         )
+                        ON CONFLICT (device_id, external_event_id) DO NOTHING
                         RETURNING id, device_id, external_event_id, event_type,
                                   credential_ref, occurred_at, received_at
                         """)
@@ -50,7 +52,21 @@ public class JdbcAccessEventRepository implements AccessEventRepository {
                 .param("credentialRef", credentialRef)
                 .param("occurredAt", OffsetDateTime.ofInstant(occurredAt, ZoneOffset.UTC))
                 .query(EVENT_ROW_MAPPER)
-                .single();
+                .optional();
+    }
+
+    @Override
+    public Optional<AccessEvent> findByDeviceIdAndExternalEventId(UUID deviceId, String externalEventId) {
+        return jdbcClient.sql("""
+                        SELECT id, device_id, external_event_id, event_type,
+                               credential_ref, occurred_at, received_at
+                        FROM access_event
+                        WHERE device_id = :deviceId AND external_event_id = :externalEventId
+                        """)
+                .param("deviceId", deviceId)
+                .param("externalEventId", externalEventId)
+                .query(EVENT_ROW_MAPPER)
+                .optional();
     }
 
     @Override

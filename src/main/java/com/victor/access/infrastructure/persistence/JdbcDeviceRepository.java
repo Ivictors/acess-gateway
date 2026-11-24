@@ -22,17 +22,18 @@ public class JdbcDeviceRepository implements DeviceRepository {
     }
 
     @Override
-    public Device create(UUID id, String serialNumber, String name) {
+    public Optional<Device> createIfAbsent(UUID id, String serialNumber, String name) {
         return jdbcClient.sql("""
                         INSERT INTO device (id, serial_number, name)
                         VALUES (:id, :serialNumber, :name)
+                        ON CONFLICT (serial_number) DO NOTHING
                         RETURNING id, serial_number, name, active, created_at
                         """)
                 .param("id", id)
                 .param("serialNumber", serialNumber)
                 .param("name", name)
                 .query(DEVICE_ROW_MAPPER)
-                .single();
+                .optional();
     }
 
     @Override

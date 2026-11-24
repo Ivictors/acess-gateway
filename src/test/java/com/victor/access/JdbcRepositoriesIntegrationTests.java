@@ -18,7 +18,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
@@ -46,7 +45,7 @@ class JdbcRepositoriesIntegrationTests {
     void createsDeviceWithDatabaseDefaultsAndFindsItById() {
         UUID id = UUID.randomUUID();
 
-        Device created = devices.create(id, "SN-001", "Front door");
+        Device created = devices.createIfAbsent(id, "SN-001", "Front door").orElseThrow();
 
         assertEquals(id, created.getId());
         assertEquals("SN-001", created.getSerialNumber());
@@ -63,17 +62,17 @@ class JdbcRepositoriesIntegrationTests {
     void listsOnlyDeviceEventsInOccurrenceOrderAndAppliesLimit() {
         UUID deviceId = UUID.randomUUID();
         UUID otherDeviceId = UUID.randomUUID();
-        devices.create(deviceId, "SN-002", "Side door");
-        devices.create(otherDeviceId, "SN-003", "Back door");
+        devices.createIfAbsent(deviceId, "SN-002", "Side door").orElseThrow();
+        devices.createIfAbsent(otherDeviceId, "SN-003", "Back door").orElseThrow();
 
         Instant olderTime = Instant.parse("2026-01-01T10:00:00.123456Z");
         Instant newerTime = Instant.parse("2026-01-01T11:00:00.654321Z");
-        AccessEvent older = events.create(UUID.randomUUID(), deviceId, "evt-1",
-                EventType.ACCESS_GRANTED, "card-1", olderTime);
-        AccessEvent newer = events.create(UUID.randomUUID(), deviceId, "evt-2",
-                EventType.ACCESS_DENIED, "card-2", newerTime);
-        events.create(UUID.randomUUID(), otherDeviceId, "evt-1",
-                EventType.EXIT_REGISTERED, "card-3", newerTime);
+        AccessEvent older = events.createIfAbsent(UUID.randomUUID(), deviceId, "evt-1",
+                EventType.ACCESS_GRANTED, "card-1", olderTime).orElseThrow();
+        AccessEvent newer = events.createIfAbsent(UUID.randomUUID(), deviceId, "evt-2",
+                EventType.ACCESS_DENIED, "card-2", newerTime).orElseThrow();
+        events.createIfAbsent(UUID.randomUUID(), otherDeviceId, "evt-1",
+                EventType.EXIT_REGISTERED, "card-3", newerTime).orElseThrow();
 
         assertEquals(olderTime, older.getOccurredAt());
         assertEquals(deviceId, older.getDeviceId());
@@ -101,9 +100,9 @@ class JdbcRepositoriesIntegrationTests {
 
         try {
             transaction.executeWithoutResult(status -> {
-                devices.create(deviceId, "SN-005", "Lobby");
-                events.create(eventId, deviceId, "evt-committed",
-                        EventType.ACCESS_GRANTED, "card-5", Instant.parse("2026-01-01T12:00:00Z"));
+                devices.createIfAbsent(deviceId, "SN-005", "Lobby").orElseThrow();
+                events.createIfAbsent(eventId, deviceId, "evt-committed",
+                        EventType.ACCESS_GRANTED, "card-5", Instant.parse("2026-01-01T12:00:00Z")).orElseThrow();
             });
 
             transaction.executeWithoutResult(status -> {
@@ -122,27 +121,27 @@ class JdbcRepositoriesIntegrationTests {
 
     @Test
     void rejectsDuplicateDeviceSerialNumber() {
-        devices.create(UUID.randomUUID(), "SN-duplicate", "First door");
+        devices.createIfAbsent(UUID.randomUUID(), "SN-duplicate", "First door").orElseThrow();
 
-        assertThrows(DuplicateKeyException.class, () ->
-                devices.create(UUID.randomUUID(), "SN-duplicate", "Second door"));
+        assertTrue(devices.createIfAbsent(UUID.randomUUID(), "SN-duplicate", "Second door").isEmpty());
     }
 
     @Test
     void rejectsDuplicateExternalEventIdForSameDevice() {
         UUID deviceId = UUID.randomUUID();
-        devices.create(deviceId, "SN-004", "Garage");
-        events.create(UUID.randomUUID(), deviceId, "evt-duplicate",
-                EventType.ACCESS_GRANTED, "card-1", Instant.now());
+        devices.createIfAbsent(deviceId, "SN-004", "Garage").orElseThrow();
+        AccessEvent original = events.createIfAbsent(UUID.randomUUID(), deviceId, "evt-duplicate",
+                EventType.ACCESS_GRANTED, "card-1", Instant.now()).orElseThrow();
 
-        assertThrows(DuplicateKeyException.class, () -> events.create(
-                UUID.randomUUID(), deviceId, "evt-duplicate",
-                EventType.ACCESS_DENIED, "card-2", Instant.now()));
+        assertTrue(events.createIfAbsent(UUID.randomUUID(), deviceId, "evt-duplicate",
+                EventType.ACCESS_DENIED, "card-2", Instant.now()).isEmpty());
+        assertEquals(original.getId(), events.findByDeviceIdAndExternalEventId(deviceId, "evt-duplicate")
+                .orElseThrow().getId());
     }
 
     @Test
     void rejectsEventForUnknownDevice() {
-        assertThrows(DataIntegrityViolationException.class, () -> events.create(
+        assertThrows(DataIntegrityViolationException.class, () -> events.createIfAbsent(
                 UUID.randomUUID(), UUID.randomUUID(), "evt-orphan",
                 EventType.ACCESS_DENIED, "card-1", Instant.now()));
     }
