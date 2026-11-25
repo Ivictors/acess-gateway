@@ -15,6 +15,7 @@ import com.victor.access.application.ConflictException;
 import com.victor.access.application.CreateDeviceUseCase;
 import com.victor.access.application.IngestDeviceEventUseCase;
 import com.victor.access.domain.model.Device;
+import com.victor.access.domain.model.EventClassification;
 import com.victor.access.domain.model.EventType;
 import com.victor.access.domain.repository.AccessEventRepository;
 import java.time.Instant;
@@ -54,6 +55,102 @@ class AccessApiIntegrationTests {
 
     @Autowired
     private JdbcClient jdbcClient;
+
+    @Test
+    void classifiesTransitionsAcrossDevicesInOneArea() throws Exception {
+        var first = createDevice.execute("SN-presence-a", "Entrance");
+        var second = createDevice.execute("SN-presence-b", "Side entrance");
+        String credential = "card-presence";
+
+        var entry = ingestEvent.execute(new IngestDeviceEventUseCase.Command(
+                first.device().getId(), "entry-1", EventType.ACCESS_GRANTED, credential,
+                Instant.parse("2026-01-01T10:00:00Z")));
+        var denied = ingestEvent.execute(new IngestDeviceEventUseCase.Command(
+                second.device().getId(), "denied-1", EventType.ACCESS_DENIED, credential,
+                Instant.parse("2026-01-01T10:01:00Z")));
+        var secondEntry = ingestEvent.execute(new IngestDeviceEventUseCase.Command(
+                second.device().getId(), "entry-2", EventType.ACCESS_GRANTED, credential,
+                Instant.parse("2026-01-01T10:02:00Z")));
+        var exit = ingestEvent.execute(new IngestDeviceEventUseCase.Command(
+                first.device().getId(), "exit-1", EventType.EXIT_REGISTERED, credential,
+                Instant.parse("2026-01-01T10:03:00Z")));
+        var secondExit = ingestEvent.execute(new IngestDeviceEventUseCase.Command(
+                second.device().getId(), "exit-2", EventType.EXIT_REGISTERED, credential,
+                Instant.parse("2026-01-01T10:04:00Z")));
+
+        assertEquals(EventClassification.NORMAL, entry.event().getClassification());
+        assertEquals(EventClassification.NORMAL, denied.event().getClassification());
+        assertEquals(EventClassification.ENTRY_WHILE_INSIDE, secondEntry.event().getClassification());
+        assertEquals(EventClassification.NORMAL, exit.event().getClassification());
+        assertEquals(EventClassification.EXIT_WHILE_OUTSIDE, secondExit.event().getClassification());
+        assertEquals(EventClassification.ENTRY_WHILE_INSIDE,
+                ingestEvent.execute(new IngestDeviceEventUseCase.Command(
+                        second.device().getId(), "entry-2", EventType.ACCESS_GRANTED, credential,
+                        Instant.parse("2026-01-01T10:02:00Z"))).event().getClassification());
+
+        mvc.perform(get("/devices/{id}/events", second.device().getId())
+                        .header("Authorization", "Bearer " + ADMIN_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[1].classification").value("ENTRY_WHILE_INSIDE"));
+    }
+
+    @Test
+    void storesLateTransitionsWithoutChangingCurrentPresence() {
+        UUID deviceId = createDevice.execute("SN-late-events", "Entrance").device().getId();
+        String credential = "card-late";
+        ingestEvent.execute(new IngestDeviceEventUseCase.Command(deviceId, "entry-new",
+                EventType.ACCESS_GRANTED, credential, Instant.parse("2026-01-01T10:10:00Z")));
+        var lateExit = ingestEvent.execute(new IngestDeviceEventUseCase.Command(deviceId, "exit-late",
+                EventType.EXIT_REGISTERED, credential, Instant.parse("2026-01-01T10:00:00Z")));
+        var currentExit = ingestEvent.execute(new IngestDeviceEventUseCase.Command(deviceId, "exit-current",
+                EventType.EXIT_REGISTERED, credential, Instant.parse("2026-01-01T10:20:00Z")));
+
+        assertEquals(EventClassification.OUT_OF_ORDER, lateExit.event().getClassification());
+        assertEquals(EventClassification.NORMAL, currentExit.event().getClassification());
+        assertEquals(EventClassification.OUT_OF_ORDER,
+                events.findByDeviceIdAndExternalEventId(deviceId, "exit-late")
+                        .orElseThrow().getClassification());
+        assertEquals(false, jdbcClient.sql("SELECT inside FROM access_presence WHERE credential_ref = :ref")
+                .param("ref", credential).query(Boolean.class).single());
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrentDistinctEntriesAreClassifiedConsistently() throws Exception {
+        Device device = createDevice.execute("SN-presence-concurrent", "Entrance").device();
+        UUID deviceId = device.getId();
+        CountDownLatch start = new CountDownLatch(1);
+        var workers = Executors.newFixedThreadPool(2);
+        try {
+            var first = workers.submit(() -> {
+                start.await();
+                return ingestEvent.execute(new IngestDeviceEventUseCase.Command(deviceId, "entry-a",
+                        EventType.ACCESS_GRANTED, "card-concurrent-presence",
+                        Instant.parse("2026-01-01T10:00:00Z")));
+            });
+            var second = workers.submit(() -> {
+                start.await();
+                return ingestEvent.execute(new IngestDeviceEventUseCase.Command(deviceId, "entry-b",
+                        EventType.ACCESS_GRANTED, "card-concurrent-presence",
+                        Instant.parse("2026-01-01T10:00:00Z")));
+            });
+            start.countDown();
+
+            var classifications = java.util.Set.of(first.get(15, TimeUnit.SECONDS).event().getClassification(),
+                    second.get(15, TimeUnit.SECONDS).event().getClassification());
+            assertEquals(java.util.Set.of(EventClassification.NORMAL, EventClassification.OUT_OF_ORDER),
+                    classifications);
+            assertEquals(2, events.findByDeviceId(deviceId, 10).size());
+            assertTrue(jdbcClient.sql("SELECT inside FROM access_presence WHERE credential_ref = :ref")
+                    .param("ref", "card-concurrent-presence").query(Boolean.class).single());
+        } finally {
+            workers.shutdownNow();
+            jdbcClient.sql("DELETE FROM access_event WHERE device_id = :deviceId")
+                    .param("deviceId", deviceId).update();
+            jdbcClient.sql("DELETE FROM device WHERE id = :id")
+                    .param("id", deviceId).update();
+        }
+    }
 
     @Test
     void rejectsMissingOccurredAtBeforeIngestingEvent() throws Exception {

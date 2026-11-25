@@ -11,6 +11,7 @@ public class AccessEvent {
     private final String credentialRef;
     private final Instant occurredAt;
     private final Instant receivedAt;
+    private final EventClassification classification;
 
     public AccessEvent(
             UUID id,
@@ -19,7 +20,8 @@ public class AccessEvent {
             EventType eventType,
             String credentialRef,
             Instant occurredAt,
-            Instant receivedAt
+            Instant receivedAt,
+            EventClassification classification
     ) {
         this.id = id;
         this.deviceId = deviceId;
@@ -28,6 +30,7 @@ public class AccessEvent {
         this.credentialRef = credentialRef;
         this.occurredAt = occurredAt;
         this.receivedAt = receivedAt;
+        this.classification = classification;
     }
 
     public UUID getId() {
@@ -56,5 +59,14 @@ public class AccessEvent {
 
     public Instant getReceivedAt() {
         return receivedAt;
+    }
+
+    public EventClassification getClassification() {
+        return classification;
+    }
+
+    public AccessEvent withClassification(EventClassification classification) {
+        return new AccessEvent(id, deviceId, externalEventId, eventType,
+                credentialRef, occurredAt, receivedAt, classification);
     }
 }

@@ -55,4 +55,12 @@ Dispositivos cadastrados antes da migração V2 ainda não têm chave. Use a mes
 
 ## Escolhas e limites
 
+### Presença na área (fase 1)
+
+Todos os dispositivos pertencem à mesma área nesta versão. `credentialRef` identifica a mesma credencial em todos eles. O sistema parte do estado **fora** quando ainda não há entrada ou saída conhecida. Uma entrada (`ACCESS_GRANTED`) marca a credencial como dentro; uma saída (`EXIT_REGISTERED`) marca como fora. `ACCESS_DENIED` não muda a posição.
+
+Cada evento recebe uma `classification` na resposta de ingestão e na consulta: `NORMAL`, `ENTRY_WHILE_INSIDE`, `EXIT_WHILE_OUTSIDE` ou `OUT_OF_ORDER`. Uma segunda entrada ou saída é registrada com sua classificação, sem alterar o `eventType` informado pelo dispositivo. Reenvios do mesmo `externalEventId` mantêm a classificação original. Eventos anteriores à migração V3 aparecem como `UNCLASSIFIED`; a posição inicial na migração usa o evento de entrada ou saída mais recente de cada credencial.
+
+Para entradas e saídas novas, um `occurredAt` igual ou anterior ao último evento de transição aplicado é `OUT_OF_ORDER`: fica no histórico, mas não altera a posição atual. Eventos de acesso negado não participam dessa ordem porque não alteram a posição. O gateway recebe eventos após a decisão do dispositivo; esta classificação não impede uma porta de abrir. A prevenção física exigirá uma solicitação de autorização antes da abertura e uma política para funcionamento sem conexão.
+
 Tokens opacos permitem revogação imediata sem um servidor externo de identidade, mas exigem consulta ao banco em cada requisição de dispositivo. Um token administrativo único simplifica o início do projeto, mas não identifica operadores individualmente. Para equipes com múltiplos operadores, auditoria por pessoa ou login interativo, substitua esse token por um provedor de identidade (OIDC/OAuth2). Não coloque tokens em URL, logs ou arquivos versionados.
