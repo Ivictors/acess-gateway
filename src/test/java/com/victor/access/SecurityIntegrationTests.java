@@ -149,7 +149,36 @@ class SecurityIntegrationTests {
     @Test
     void rejectsWeakAdministrativeTokenConfiguration() {
         assertThrows(IllegalArgumentException.class,
-                () -> new GatewayTokenIntrospector(null, new DeviceTokenService(), "short-token"));
+                () -> new GatewayTokenIntrospector(null, null, new DeviceTokenService(), "short-token"));
+    }
+
+    @Test
+    void inactiveDeviceTokenCannotAuthenticateEvenForAnExistingEvent() throws Exception {
+        String registration = register("SN-security-inactive");
+        String token = JsonPath.read(registration, "$.apiKey");
+        UUID deviceId = UUID.fromString(JsonPath.read(registration, "$.device.id"));
+        String originalEvent = eventJson(deviceId, "event-before-deactivation");
+
+        mvc.perform(post("/device-events").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(originalEvent))
+                .andExpect(status().isCreated());
+        jdbcClient.sql("UPDATE device SET active = FALSE WHERE id = :id")
+                .param("id", deviceId).update();
+
+        mvc.perform(post("/device-events").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(originalEvent))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/device-events").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(eventJson(deviceId, "new-event")))
+                .andExpect(status().isUnauthorized());
+        assertEquals(1, jdbcClient.sql("SELECT COUNT(*) FROM access_event WHERE device_id = :id")
+                .param("id", deviceId).query(Integer.class).single());
+
+        jdbcClient.sql("UPDATE device SET active = TRUE WHERE id = :id")
+                .param("id", deviceId).update();
+        mvc.perform(post("/device-events").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content(originalEvent))
+                .andExpect(status().isOk());
     }
 
     private String register(String serialNumber) throws Exception {

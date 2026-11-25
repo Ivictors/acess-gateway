@@ -3,5 +3,7 @@ spring:
     name: acess-gateway
 
 access:
+  events:
+    max-future-skew: 5m
   security:
     admin-token: ${ACCESS_GATEWAY_ADMIN_TOKEN}

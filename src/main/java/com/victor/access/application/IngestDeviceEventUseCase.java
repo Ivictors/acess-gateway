@@ -8,10 +8,13 @@ import com.victor.access.domain.model.PresencePolicy;
 import com.victor.access.domain.repository.AccessEventRepository;
 import com.victor.access.domain.repository.AccessPresenceRepository;
 import com.victor.access.domain.repository.DeviceRepository;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,12 +23,20 @@ public class IngestDeviceEventUseCase {
     private final DeviceRepository devices;
     private final AccessEventRepository events;
     private final AccessPresenceRepository presence;
+    private final Clock clock;
+    private final Duration maxFutureSkew;
 
     public IngestDeviceEventUseCase(DeviceRepository devices, AccessEventRepository events,
-                                    AccessPresenceRepository presence) {
+                                    AccessPresenceRepository presence, Clock clock,
+                                    @Value("${access.events.max-future-skew}") Duration maxFutureSkew) {
+        if (maxFutureSkew.isNegative()) {
+            throw new IllegalArgumentException("access.events.max-future-skew must not be negative");
+        }
         this.devices = devices;
         this.events = events;
         this.presence = presence;
+        this.clock = clock;
+        this.maxFutureSkew = maxFutureSkew;
     }
 
     @Transactional
@@ -40,9 +51,12 @@ public class IngestDeviceEventUseCase {
                 .orElseThrow(() -> new DeviceNotFoundException(command.deviceId()));
         Instant occurredAt = command.occurredAt().truncatedTo(ChronoUnit.MICROS);
         if (!device.isActive()) {
+            throw new ConflictException("Device is inactive");
+        }
+        if (occurredAt.isAfter(clock.instant().plus(maxFutureSkew))) {
             return events.findByDeviceIdAndExternalEventId(command.deviceId(), command.externalEventId())
                     .map(existing -> existingResult(existing, command, occurredAt))
-                    .orElseThrow(() -> new ConflictException("Device is inactive"));
+                    .orElseThrow(InvalidEventTimeException::new);
         }
 
         return events.createIfAbsent(

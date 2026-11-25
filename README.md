@@ -24,6 +24,8 @@ A API aceita `Authorization: Bearer <token>`. Há dois tipos de token:
 
 O servidor não cria sessões. A rota `GET /actuator/health` é pública; as demais rotas exigem autenticação e a função adequada. As respostas que entregam uma credencial incluem `Cache-Control: no-store`.
 
+Dispositivos inativos não conseguem autenticar com sua chave: qualquer requisição com ela recebe `401 Unauthorized`, inclusive o reenvio de um evento antigo. Se o dispositivo for reativado, a chave existente volta a funcionar. Para revogá-la definitivamente, troque a credencial.
+
 ### Configuração local
 
 `.env.example` e `application.properties.example` contêm apenas valores fictícios para desenvolvimento. Copie o formato desejado para `.env` ou `src/main/resources/application.properties`; esses arquivos locais são ignorados pelo Git. O arquivo `application.yml` versionado mantém a leitura obrigatória de `ACCESS_GATEWAY_ADMIN_TOKEN` quando não há uma configuração local. Se copiar o exemplo de `application.properties`, substitua o token e as credenciais fictícias no próprio arquivo antes de expor a API: o token literal desse exemplo prevalece sobre a referência ao ambiente no `application.yml`.
@@ -87,5 +89,18 @@ Todos os dispositivos pertencem à mesma área nesta versão. `credentialRef` id
 Cada evento recebe uma `classification` na resposta de ingestão e na consulta: `NORMAL`, `ENTRY_WHILE_INSIDE`, `EXIT_WHILE_OUTSIDE` ou `OUT_OF_ORDER`. Uma segunda entrada ou saída é registrada com sua classificação, sem alterar o `eventType` informado pelo dispositivo. Reenvios do mesmo `externalEventId` mantêm a classificação original. Eventos anteriores à migração V3 aparecem como `UNCLASSIFIED`; a posição inicial na migração usa o evento de entrada ou saída mais recente de cada credencial.
 
 Para entradas e saídas novas, um `occurredAt` igual ou anterior ao último evento de transição aplicado é `OUT_OF_ORDER`: fica no histórico, mas não altera a posição atual. Eventos de acesso negado não participam dessa ordem porque não alteram a posição. O gateway recebe eventos após a decisão do dispositivo; esta classificação não impede uma porta de abrir. A prevenção física exigirá uma solicitação de autorização antes da abertura e uma política para funcionamento sem conexão.
+
+Um evento novo com `occurredAt` mais de cinco minutos à frente do relógio do servidor recebe `400 Bad Request`, sem ser gravado nem alterar a presença. A tolerância é configurada por `access.events.max-future-skew` (padrão `5m`); o valor deve ser não negativo. O dispositivo deve corrigir seu relógio antes de enviar um novo evento com horário futuro. Um reenvio idêntico de evento já gravado continua retornando o registro original; reutilizar o mesmo `externalEventId` com dados diferentes retorna `409 Conflict`. Eventos futuros armazenados antes dessa regra não são corrigidos automaticamente e exigem inspeção dos dados de presença.
+
+Para localizar eventos históricos com horário mais de cinco minutos à frente do recebimento, execute uma consulta de leitura no PostgreSQL:
+
+```sql
+SELECT id, device_id, external_event_id, credential_ref, occurred_at, received_at
+FROM access_event
+WHERE occurred_at > received_at + INTERVAL '5 minutes'
+ORDER BY received_at DESC;
+```
+
+Antes de corrigir `access_presence`, analise a sequência de entrada e saída da credencial afetada; alterar somente o horário do último evento pode produzir uma presença incorreta. A tolerância reduz o desvio máximo aceito, mas um evento até cinco minutos adiantado ainda pode ser classificado antes de outro evento legítimo.
 
 Tokens opacos permitem revogação imediata sem um servidor externo de identidade, mas exigem consulta ao banco em cada requisição de dispositivo. Um token administrativo único simplifica o início do projeto, mas não identifica operadores individualmente. Para equipes com múltiplos operadores, auditoria por pessoa ou login interativo, substitua esse token por um provedor de identidade (OIDC/OAuth2). Não coloque tokens em URL, logs ou arquivos versionados.
