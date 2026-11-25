@@ -26,6 +26,18 @@ O servidor não cria sessões. A rota `GET /actuator/health` é pública; as dem
 
 ### Configuração local
 
+`.env.example` e `application.properties.example` contêm apenas valores fictícios para desenvolvimento. Copie o formato desejado para `.env` ou `src/main/resources/application.properties`; esses arquivos locais são ignorados pelo Git. O arquivo `application.yml` versionado mantém a leitura obrigatória de `ACCESS_GATEWAY_ADMIN_TOKEN` quando não há uma configuração local. Se copiar o exemplo de `application.properties`, substitua o token e as credenciais fictícias no próprio arquivo antes de expor a API: o token literal desse exemplo prevalece sobre a referência ao ambiente no `application.yml`.
+
+O Spring Boot não carrega `.env` automaticamente. Para usar esse arquivo no PowerShell, carregue as variáveis no processo antes de iniciar a aplicação:
+
+```powershell
+Get-Content .env | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object {
+    $name, $value = $_ -split '=', 2
+    [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+}
+.\mvnw.cmd spring-boot:run
+```
+
 Defina as variáveis do banco (`SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`) e gere um segredo administrativo aleatório. No PowerShell:
 
 ```powershell
