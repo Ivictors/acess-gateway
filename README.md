@@ -2,6 +2,19 @@
 
 Backend Java para cadastrar dispositivos e receber eventos de acesso.
 
+## Integração e entrega contínuas
+
+O workflow `CI` executa `clean verify` com Java 21 em pull requests e em pushes para `main`. Os testes de integração usam PostgreSQL via Testcontainers; o runner precisa de Docker, mas não de um banco compartilhado nem de segredos de produção.
+
+Uma tag `v*` executa novamente os testes e, se passarem, publica uma imagem no GitHub Container Registry com tags de versão e de commit. Exemplo, após integrar as alterações em `main`:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+A imagem fica em `ghcr.io/ivictors/acess-gateway:v0.1.0`. A publicação não implanta a aplicação. O pacote no GHCR pode exigir que sua visibilidade seja alterada para pública nas configurações do pacote, caso se deseje permitir downloads anônimos. As credenciais de banco e o token administrativo pertencem ao ambiente de execução, não aos workflows.
+
 ## Autenticação
 
 A API aceita `Authorization: Bearer <token>`. Há dois tipos de token:
