@@ -1,0 +1,5 @@
+spring.application.name=acess-gateway
+spring.datasource.url=jdbc:postgresql://localhost:5432/access_gateway
+spring.datasource.username=access_gateway
+spring.datasource.password=local_dev_password
+access.security.admin-token=local-dev-admin-token-replace-before-sharing-123456789

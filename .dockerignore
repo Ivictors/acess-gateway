@@ -1,7 +1,11 @@
 .git
 .github
+.env
+.env.example
+application.properties.example
 .idea
 .vscode
 target
+src/main/resources/application.properties
 *.iml
 README.md
