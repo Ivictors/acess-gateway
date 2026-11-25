@@ -209,16 +209,14 @@ class AccessApiIntegrationTests {
         var original = new IngestDeviceEventUseCase.Command(
                 device.getId(), "event-before-deactivation", EventType.ACCESS_GRANTED,
                 "card-1", Instant.parse("2026-01-01T10:00:00Z"));
-        var first = ingestEvent.execute(original);
+        ingestEvent.execute(original);
         jdbcClient.sql("UPDATE device SET active = FALSE WHERE id = :id")
                 .param("id", device.getId()).update();
 
         var command = new IngestDeviceEventUseCase.Command(
                 device.getId(), "event-1", EventType.ACCESS_GRANTED, "card-1", Instant.now());
         assertThrows(ConflictException.class, () -> ingestEvent.execute(command));
-        var retry = ingestEvent.execute(original);
-        assertFalse(retry.created());
-        assertEquals(first.event().getId(), retry.event().getId());
+        assertThrows(ConflictException.class, () -> ingestEvent.execute(original));
         assertEquals(1, events.findByDeviceId(device.getId(), 10).size());
     }
 

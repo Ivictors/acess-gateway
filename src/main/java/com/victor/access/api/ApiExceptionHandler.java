@@ -3,6 +3,7 @@ package com.victor.access.api;
 import com.victor.access.application.ConflictException;
 import com.victor.access.application.DeviceNotFoundException;
 import com.victor.access.application.InvalidEventLimitException;
+import com.victor.access.application.InvalidEventTimeException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,8 +21,8 @@ public class ApiExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, exception.getMessage());
     }
 
-    @ExceptionHandler(InvalidEventLimitException.class)
-    public ProblemDetail invalidArgument(InvalidEventLimitException exception) {
+    @ExceptionHandler({InvalidEventLimitException.class, InvalidEventTimeException.class})
+    public ProblemDetail invalidArgument(RuntimeException exception) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, exception.getMessage());
     }
 }
