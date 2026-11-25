@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  java-verify:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
