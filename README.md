@@ -104,3 +104,16 @@ ORDER BY received_at DESC;
 Antes de corrigir `access_presence`, analise a sequência de entrada e saída da credencial afetada; alterar somente o horário do último evento pode produzir uma presença incorreta. A tolerância reduz o desvio máximo aceito, mas um evento até cinco minutos adiantado ainda pode ser classificado antes de outro evento legítimo.
 
 Tokens opacos permitem revogação imediata sem um servidor externo de identidade, mas exigem consulta ao banco em cada requisição de dispositivo. Um token administrativo único simplifica o início do projeto, mas não identifica operadores individualmente. Para equipes com múltiplos operadores, auditoria por pessoa ou login interativo, substitua esse token por um provedor de identidade (OIDC/OAuth2). Não coloque tokens em URL, logs ou arquivos versionados.
+
+## Padrão de documentação e configuração
+
+Este repositório existe para receber e validar eventos de dispositivos com autenticação e persistência. O README acima apresenta o escopo, a arquitetura e as tecnologias específicas do projeto; esta seção padroniza o ponto de entrada para quem deseja reproduzi-lo localmente.
+
+### Clonar e configurar
+
+~~~powershell
+git clone https://github.com/Ivictors/acess-gateway.git
+cd acess-gateway
+~~~
+
+Consulte os pré-requisitos e comandos de execução descritos neste README antes de iniciar. Use variáveis de ambiente, arquivos locais ignorados pelo Git e serviços de desenvolvimento para credenciais; não substitua placeholders por segredos no README e não versione chaves, tokens ou senhas.
