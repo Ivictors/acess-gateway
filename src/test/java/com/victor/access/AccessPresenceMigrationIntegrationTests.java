@@ -35,10 +35,15 @@ class AccessPresenceMigrationIntegrationTests {
                     .load().migrate();
 
             UUID deviceId = UUID.randomUUID();
+            UUID secondDeviceId = UUID.randomUUID();
             UUID exitId = UUID.randomUUID();
+            UUID sharedExitId = UUID.randomUUID();
             jdbcClient.sql("INSERT INTO " + schema + ".device (id, serial_number, name) "
                             + "VALUES (:id, 'SN-legacy', 'Legacy reader')")
                     .param("id", deviceId).update();
+            jdbcClient.sql("INSERT INTO " + schema + ".device (id, serial_number, name) "
+                            + "VALUES (:id, 'SN-legacy-2', 'Second legacy reader')")
+                    .param("id", secondDeviceId).update();
             insertEvent(schema, deviceId, UUID.randomUUID(), "entry", "ACCESS_GRANTED",
                     "card-legacy", "2026-01-01T10:00:00Z");
             insertEvent(schema, deviceId, exitId, "exit", "EXIT_REGISTERED",
@@ -47,6 +52,8 @@ class AccessPresenceMigrationIntegrationTests {
                     "card-legacy", "2026-01-01T12:00:00Z");
             insertEvent(schema, deviceId, UUID.randomUUID(), "other-entry", "ACCESS_GRANTED",
                     "card-other", "2026-01-01T13:00:00Z");
+            insertEvent(schema, secondDeviceId, sharedExitId, "shared-exit", "EXIT_REGISTERED",
+                    "card-legacy", "2026-01-01T14:00:00Z");
 
             Flyway.configure().dataSource(dataSource).schemas(schema).defaultSchema(schema)
                     .locations("classpath:db/migration").load().migrate();
@@ -54,15 +61,23 @@ class AccessPresenceMigrationIntegrationTests {
             assertFalse(jdbcClient.sql("SELECT inside FROM " + schema
                             + ".access_presence WHERE credential_ref = 'card-legacy'")
                     .query(Boolean.class).single());
-            assertEquals(exitId, jdbcClient.sql("SELECT last_event_id FROM " + schema
+            assertEquals(sharedExitId, jdbcClient.sql("SELECT last_event_id FROM " + schema
                             + ".access_presence WHERE credential_ref = 'card-legacy'")
                     .query(UUID.class).single());
             assertTrue(jdbcClient.sql("SELECT inside FROM " + schema
                             + ".access_presence WHERE credential_ref = 'card-other'")
                     .query(Boolean.class).single());
-            assertEquals(4L, jdbcClient.sql("SELECT count(*) FROM " + schema
+            assertEquals(5L, jdbcClient.sql("SELECT count(*) FROM " + schema
                             + ".access_event WHERE classification = 'UNCLASSIFIED'")
                     .query(Long.class).single());
+            assertEquals(2L, jdbcClient.sql("SELECT count(*) FROM " + schema
+                            + ".credential_ref").query(Long.class).single());
+            assertEquals(2L, jdbcClient.sql("SELECT count(*) FROM " + schema
+                            + ".device_credential_ref WHERE device_id = :id")
+                    .param("id", deviceId).query(Long.class).single());
+            assertEquals(1L, jdbcClient.sql("SELECT count(*) FROM " + schema
+                            + ".device_credential_ref WHERE device_id = :id AND credential_ref = 'card-legacy'")
+                    .param("id", secondDeviceId).query(Long.class).single());
         } finally {
             try (Connection connection = dataSource.getConnection();
                  var statement = connection.createStatement()) {

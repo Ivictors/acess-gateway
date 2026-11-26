@@ -9,6 +9,7 @@ import com.victor.access.application.CreateDeviceUseCase;
 import com.victor.access.application.IngestDeviceEventUseCase;
 import com.victor.access.application.InvalidEventTimeException;
 import com.victor.access.domain.model.EventType;
+import com.victor.access.infrastructure.persistence.JdbcCredentialRefRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -45,10 +46,15 @@ class FutureEventTimeIntegrationTests {
     @Autowired
     private MockMvc mvc;
 
+    @Autowired
+    private JdbcCredentialRefRepository refs;
+
     @Test
     void acceptsBoundaryAndRejectsLaterEventWithoutChangingPresence() throws Exception {
         var registration = createDevice.execute("SN-time-boundary", "Entrance");
         UUID deviceId = registration.device().getId();
+        refs.create("card-at-boundary");
+        refs.assign(deviceId, "card-at-boundary");
         Instant boundary = NOW.plusSeconds(300);
         Instant beyondBoundary = boundary.plusNanos(1_000);
 

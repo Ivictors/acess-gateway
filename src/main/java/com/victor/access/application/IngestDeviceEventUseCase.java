@@ -8,6 +8,7 @@ import com.victor.access.domain.model.PresencePolicy;
 import com.victor.access.domain.repository.AccessEventRepository;
 import com.victor.access.domain.repository.AccessPresenceRepository;
 import com.victor.access.domain.repository.DeviceRepository;
+import com.victor.access.domain.repository.CredentialRefRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -23,11 +24,12 @@ public class IngestDeviceEventUseCase {
     private final DeviceRepository devices;
     private final AccessEventRepository events;
     private final AccessPresenceRepository presence;
+    private final CredentialRefRepository credentialRefs;
     private final Clock clock;
     private final Duration maxFutureSkew;
 
     public IngestDeviceEventUseCase(DeviceRepository devices, AccessEventRepository events,
-                                    AccessPresenceRepository presence, Clock clock,
+                                    AccessPresenceRepository presence, CredentialRefRepository credentialRefs, Clock clock,
                                     @Value("${access.events.max-future-skew}") Duration maxFutureSkew) {
         if (maxFutureSkew.isNegative()) {
             throw new IllegalArgumentException("access.events.max-future-skew must not be negative");
@@ -35,6 +37,7 @@ public class IngestDeviceEventUseCase {
         this.devices = devices;
         this.events = events;
         this.presence = presence;
+        this.credentialRefs = credentialRefs;
         this.clock = clock;
         this.maxFutureSkew = maxFutureSkew;
     }
@@ -53,10 +56,15 @@ public class IngestDeviceEventUseCase {
         if (!device.isActive()) {
             throw new ConflictException("Device is inactive");
         }
+        var existing = events.findByDeviceIdAndExternalEventId(command.deviceId(), command.externalEventId());
+        if (existing.isPresent()) {
+            return existingResult(existing.get(), command, occurredAt);
+        }
         if (occurredAt.isAfter(clock.instant().plus(maxFutureSkew))) {
-            return events.findByDeviceIdAndExternalEventId(command.deviceId(), command.externalEventId())
-                    .map(existing -> existingResult(existing, command, occurredAt))
-                    .orElseThrow(InvalidEventTimeException::new);
+            throw new InvalidEventTimeException();
+        }
+        if (!credentialRefs.isAssigned(command.deviceId(), command.credentialRef())) {
+            throw new CredentialRefNotAssignedException();
         }
 
         return events.createIfAbsent(
@@ -65,10 +73,10 @@ public class IngestDeviceEventUseCase {
                 )
                 .map(event -> new Result(classify(event), true))
                 .orElseGet(() -> {
-                    AccessEvent existing = events.findByDeviceIdAndExternalEventId(
+                    AccessEvent concurrent = events.findByDeviceIdAndExternalEventId(
                                     command.deviceId(), command.externalEventId())
                             .orElseThrow(() -> new IllegalStateException("Conflicting event was not found"));
-                    return existingResult(existing, command, occurredAt);
+                    return existingResult(concurrent, command, occurredAt);
                 });
     }
 

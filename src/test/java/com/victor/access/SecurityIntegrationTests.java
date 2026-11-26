@@ -12,8 +12,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
+import io.micrometer.core.instrument.MeterRegistry;
 import com.victor.access.application.DeviceTokenService;
 import com.victor.access.infrastructure.security.GatewayTokenIntrospector;
+import com.victor.access.infrastructure.persistence.JdbcCredentialRefRepository;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.UUID;
@@ -39,6 +41,28 @@ class SecurityIntegrationTests {
 
     @Autowired
     private JdbcClient jdbcClient;
+
+    @Autowired
+    private JdbcCredentialRefRepository refs;
+
+    @Autowired
+    private MeterRegistry meters;
+
+    @Test
+    void countsAuthenticationAndAuthorizationFailuresWithBoundedTags() throws Exception {
+        double before401 = meters.counter("gateway.security.failures", "route", "events",
+                "outcome", "unauthorized").count();
+        double before403 = meters.counter("gateway.security.failures", "route", "events",
+                "outcome", "forbidden").count();
+        mvc.perform(post("/device-events").header("Authorization", "Bearer invalid-token"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/device-events").header("Authorization", "Bearer " + ADMIN_TOKEN))
+                .andExpect(status().isForbidden());
+        assertEquals(before401 + 1, meters.counter("gateway.security.failures", "route", "events",
+                "outcome", "unauthorized").count());
+        assertEquals(before403 + 1, meters.counter("gateway.security.failures", "route", "events",
+                "outcome", "forbidden").count());
+    }
 
     @Test
     void rejectsMissingInvalidAndWrongRoleTokens() throws Exception {
@@ -71,6 +95,8 @@ class SecurityIntegrationTests {
         String firstToken = JsonPath.read(firstRegistration, "$.apiKey");
         UUID firstId = UUID.fromString(JsonPath.read(firstRegistration, "$.device.id"));
         UUID secondId = UUID.fromString(JsonPath.read(secondRegistration, "$.device.id"));
+        refs.create("card-1");
+        refs.assign(firstId, "card-1");
 
         mvc.perform(post("/device-events").header("Authorization", "Bearer " + firstToken)
                         .contentType(MediaType.APPLICATION_JSON).content(eventJson(firstId, "event-own")))
@@ -105,6 +131,8 @@ class SecurityIntegrationTests {
                 .andExpect(jsonPath("$.apiKey").exists())
                 .andReturn().getResponse().getContentAsString();
         String newToken = JsonPath.read(rotatedBody, "$.apiKey");
+        refs.create("card-1");
+        refs.assign(deviceId, "card-1");
         assertNotEquals(oldToken, newToken);
 
         mvc.perform(post("/device-events").header("Authorization", "Bearer " + oldToken)
@@ -141,6 +169,8 @@ class SecurityIntegrationTests {
                 .andExpect(jsonPath("$.apiKey").exists())
                 .andReturn().getResponse().getContentAsString();
         String token = JsonPath.read(body, "$.apiKey");
+        refs.create("card-1");
+        refs.assign(deviceId, "card-1");
         mvc.perform(post("/device-events").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON).content(eventJson(deviceId, "event-legacy")))
                 .andExpect(status().isCreated());
@@ -158,6 +188,8 @@ class SecurityIntegrationTests {
         String token = JsonPath.read(registration, "$.apiKey");
         UUID deviceId = UUID.fromString(JsonPath.read(registration, "$.device.id"));
         String originalEvent = eventJson(deviceId, "event-before-deactivation");
+        refs.create("card-1");
+        refs.assign(deviceId, "card-1");
 
         mvc.perform(post("/device-events").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON).content(originalEvent))
