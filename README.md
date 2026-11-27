@@ -1,5 +1,44 @@
 # Access Gateway
 
+## Referencias autorizadas e limite de trafego
+
+O administrador cadastra uma referencia com `POST /credential-refs` e corpo
+`{"credentialRef":"card-001"}` (201; 409 se ja existir). Depois a atribui com
+`POST /devices/{id}/credential-refs` e o mesmo corpo (204 idempotente; 404 se
+dispositivo ou referencia nao existir). `DELETE /devices/{id}/credential-refs`
+com o mesmo corpo revoga a atribuicao (204 idempotente; 404 para dispositivo
+inexistente). Os tres endpoints exigem token de
+administrador. Eventos novos de referencias nao atribuidas retornam 403, sem
+gravar evento ou alterar presenca. Reenvios identicos de eventos antigos seguem
+retornando o registro original. A migracao V4 cadastra e atribui as referencias
+historicas aos respectivos dispositivos, preservando referencias compartilhadas.
+Uma requisicao de ingestao autorizada antes da revogacao pode terminar; a
+revogacao espera a transacao em curso e impede novas ingestoes depois dela.
+
+O gateway usa contadores atomicos no PostgreSQL. O limite inicial por janela
+fixa de 60 segundos e: 600 requisicoes por endereco de origem, 120 eventos por
+dispositivo, 60 consultas e 300 demais chamadas administrativas por
+administrador. Ajuste `access.rate-limit.window-seconds`,
+`access.rate-limit.origin`, `access.rate-limit.events`,
+`access.rate-limit.queries` e `access.rate-limit.admin`; todos devem ser
+positivos. Exceder um limite retorna 429 com `Retry-After` indicando segundos
+ate a proxima janela. O endereco vem da
+conexao, sem confiar em `X-Forwarded-For`; clientes atras de NAT compartilham
+o limite de origem. Estado expirado e removido periodicamente. Sem PostgreSQL,
+a verificacao falha e a requisicao nao segue.
+
+O controle no proxy protege antes de chegar a aplicacao, mas nao conhece a
+identidade dos dispositivos por padrao. O controle na aplicacao distingue
+origem, rota e principal e funciona entre instancias por usar o banco. A
+metrica `gateway.security.failures` conta 401/403 por familia de rota e
+resultado, sem incluir tokens, referencias ou enderecos. Monitore picos de
+401/403 em cinco minutos e respostas 429. Politica inicial sugerida: alertar
+operadores se uma familia de rota acumular 50 falhas 401/403 ou 10 respostas
+429 em cinco minutos; manter registros por 30 dias, com acesso restrito a
+operadores autorizados. Os limiares devem ser ajustados ao trafego real. Este
+repositorio nao configura coletor, alerta ativo, exportacao externa ou retencao
+de logs; essas medidas dependem do ambiente de observabilidade.
+
 Backend Java para cadastrar dispositivos e receber eventos de acesso.
 
 ## Integração e entrega contínuas

@@ -18,6 +18,7 @@ import com.victor.access.domain.model.Device;
 import com.victor.access.domain.model.EventClassification;
 import com.victor.access.domain.model.EventType;
 import com.victor.access.domain.repository.AccessEventRepository;
+import com.victor.access.infrastructure.persistence.JdbcCredentialRefRepository;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -56,11 +57,21 @@ class AccessApiIntegrationTests {
     @Autowired
     private JdbcClient jdbcClient;
 
+    @Autowired
+    private JdbcCredentialRefRepository refs;
+
+    private void authorize(UUID deviceId, String ref) {
+        refs.create(ref);
+        refs.assign(deviceId, ref);
+    }
+
     @Test
     void classifiesTransitionsAcrossDevicesInOneArea() throws Exception {
         var first = createDevice.execute("SN-presence-a", "Entrance");
         var second = createDevice.execute("SN-presence-b", "Side entrance");
         String credential = "card-presence";
+        authorize(first.device().getId(), credential);
+        authorize(second.device().getId(), credential);
 
         var entry = ingestEvent.execute(new IngestDeviceEventUseCase.Command(
                 first.device().getId(), "entry-1", EventType.ACCESS_GRANTED, credential,
@@ -98,6 +109,7 @@ class AccessApiIntegrationTests {
     void storesLateTransitionsWithoutChangingCurrentPresence() {
         UUID deviceId = createDevice.execute("SN-late-events", "Entrance").device().getId();
         String credential = "card-late";
+        authorize(deviceId, credential);
         ingestEvent.execute(new IngestDeviceEventUseCase.Command(deviceId, "entry-new",
                 EventType.ACCESS_GRANTED, credential, Instant.parse("2026-01-01T10:10:00Z")));
         var lateExit = ingestEvent.execute(new IngestDeviceEventUseCase.Command(deviceId, "exit-late",
@@ -120,6 +132,7 @@ class AccessApiIntegrationTests {
         Device device = createDevice.execute("SN-presence-concurrent", "Entrance").device();
         UUID deviceId = device.getId();
         CountDownLatch start = new CountDownLatch(1);
+        authorize(deviceId, "card-concurrent-presence");
         var workers = Executors.newFixedThreadPool(2);
         try {
             var first = workers.submit(() -> {
@@ -184,6 +197,7 @@ class AccessApiIntegrationTests {
         Device device = createDevice.execute("SN-idempotency", "Entrance").device();
         UUID deviceId = device.getId();
         Instant occurredAt = Instant.parse("2026-01-01T10:00:00.123456789Z");
+        authorize(deviceId, "card-1");
         var command = new IngestDeviceEventUseCase.Command(
                 deviceId, "event-42", EventType.ACCESS_GRANTED, "card-1", occurredAt);
 
@@ -206,6 +220,7 @@ class AccessApiIntegrationTests {
     @Test
     void refusesNewEventsForInactiveDevice() {
         Device device = createDevice.execute("SN-inactive", "Side entrance").device();
+        authorize(device.getId(), "card-1");
         var original = new IngestDeviceEventUseCase.Command(
                 device.getId(), "event-before-deactivation", EventType.ACCESS_GRANTED,
                 "card-1", Instant.parse("2026-01-01T10:00:00Z"));
@@ -224,6 +239,7 @@ class AccessApiIntegrationTests {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void simultaneousRetriesCreateOnlyOneEvent() throws Exception {
         Device device = createDevice.execute("SN-concurrent", "Entrance").device();
+        authorize(device.getId(), "card-1");
         var command = new IngestDeviceEventUseCase.Command(
                 device.getId(), "event-concurrent", EventType.ACCESS_GRANTED,
                 "card-1", Instant.parse("2026-01-01T10:00:00Z"));
@@ -271,6 +287,7 @@ class AccessApiIntegrationTests {
                 .andReturn().getResponse().getContentAsString();
         UUID deviceId = UUID.fromString(JsonPath.read(deviceBody, "$.device.id"));
         String deviceToken = JsonPath.read(deviceBody, "$.apiKey");
+        authorize(deviceId, "card-1");
 
         mvc.perform(get("/devices/{id}", deviceId).header("Authorization", "Bearer " + ADMIN_TOKEN))
                 .andExpect(status().isOk())
