@@ -1,5 +1,11 @@
 # Access Gateway
 
+## Autenticação OIDC opcional
+
+Com `ACCESS_SECURITY_OIDC_ENABLED=true`, as rotas administrativas aceitam apenas tokens de acesso assinados pelo Keycloak. Configure `ACCESS_SECURITY_OIDC_ISSUER`, `ACCESS_SECURITY_OIDC_JWK_SET_URI` e `ACCESS_SECURITY_OIDC_AUDIENCE`. O gateway valida assinatura, validade, emissor, público destinatário e a função `access-admin`; a chave do dispositivo continua sendo validada localmente e só permite enviar eventos desse dispositivo. O token administrativo compartilhado deixa de ser aceito nesse modo. O `access-infra/compose.oidc.yaml` fornece os valores locais.
+
+Sem OIDC, o contrato anterior do token administrativo permanece para os testes e a migração gradual.
+
 ## Referencias autorizadas e limite de trafego
 
 O administrador cadastra uma referencia com `POST /credential-refs` e corpo
