@@ -179,7 +179,8 @@ class SecurityIntegrationTests {
     @Test
     void rejectsWeakAdministrativeTokenConfiguration() {
         assertThrows(IllegalArgumentException.class,
-                () -> new GatewayTokenIntrospector(null, null, new DeviceTokenService(), "short-token"));
+                () -> new GatewayTokenIntrospector(null, null, new DeviceTokenService(),
+                        "short-token", false, "", "", "access-gateway"));
     }
 
     @Test
